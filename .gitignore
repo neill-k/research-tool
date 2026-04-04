@@ -1,0 +1,7 @@
+tmp/
+.codex/
+.claude/
+.idea/
+.vscode/
+.DS_Store
+*.log
