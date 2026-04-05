@@ -163,7 +163,12 @@ def main() -> int:
         )
         rendered = render_run(run, output_format=args.output_format)
         if args.output_file:
-            Path(args.output_file).write_text(rendered + "\n", encoding="utf-8")
+            output_path = Path(args.output_file)
+            try:
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_text(rendered + "\n", encoding="utf-8")
+            except OSError as exc:
+                parser.error(f"Cannot write output file '{args.output_file}': {exc}")
         else:
             print(rendered)
         return 0

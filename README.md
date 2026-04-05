@@ -63,7 +63,11 @@ Example criteria payload:
   "preferred_venues": ["NeurIPS"],
   "preferred_fields_of_study": ["Machine Learning"],
   "min_year": 2021,
-  "min_citation_count": 10
+  "max_year": null,
+  "min_citation_count": 10,
+  "text_weight": 1.0,
+  "citation_weight": 0.35,
+  "recency_weight": 0.25
 }
 ```
 

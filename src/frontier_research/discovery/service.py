@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from math import log1p
 import re
 
 from frontier_research.discovery.models import (
     CandidateScore,
     CitationDirection,
+    CitationExpansion,
     DiscoveryCandidateArtifact,
     DiscoveryCandidateProvenance,
     CitationEdge,
@@ -129,6 +130,15 @@ class DiscoveryService:
             )
             warnings.extend(criteria_warnings)
             candidates = [candidate.paper for candidate in ranked_candidates]
+            retained_ids = {
+                c.provider_paper_id for c in candidates if c.provider_paper_id
+            }
+            edges = [
+                edge for edge in edges
+                if edge.target_paper_id in retained_ids
+                or edge.source_paper_id in retained_ids
+                or edge.seed_paper_id in {s.provider_paper_id for s in seeds_by_key.values()}
+            ]
 
         candidate_scores = {
             candidate.paper.provider_paper_id or self._paper_key(candidate.paper): candidate.score
@@ -173,7 +183,15 @@ class DiscoveryService:
             candidate_count=len(candidate_artifacts),
             edge_count=len(edges),
             warning_count=len(warnings),
-            partial_failure=bool(warnings),
+            partial_failure=any(
+                w.code in (
+                    "seed_fetch_failed",
+                    "citation_expansion_failed",
+                    "provider_throttled",
+                    "provider_partial_result",
+                )
+                for w in warnings
+            ),
         )
 
         return DiscoveryRun(
@@ -204,7 +222,7 @@ class DiscoveryService:
             )
 
         seed_terms = self._seed_terms(seeds)
-        current_year = max((seed.year or 0) for seed in seeds) or 2026
+        current_year = max((seed.year or 0) for seed in seeds) or date.today().year
 
         ranked: list[RankedCandidate] = []
         warnings: list[DiscoveryWarning] = []
@@ -256,7 +274,7 @@ class DiscoveryService:
         seed: PaperMetadata,
         direction: CitationDirection,
         limit: int,
-    ):
+    ) -> CitationExpansion:
         seed_identifier = seed.provider_paper_id or identifier
         if direction is CitationDirection.FORWARD:
             return self.provider.expand_references(
@@ -395,9 +413,10 @@ class DiscoveryService:
         citation_edges: int,
         current_year: int,
     ) -> CandidateScore:
+        candidate_text_blob = self._candidate_text_blob(candidate)
         candidate_terms = self._candidate_terms(candidate)
         preferred_term_matches = sorted(
-            term for term in criteria.preferred_terms if term.casefold() in candidate_terms
+            term for term in criteria.preferred_terms if term.casefold() in candidate_text_blob
         )
         preferred_author_matches = sorted(
             author
@@ -420,10 +439,9 @@ class DiscoveryService:
         )
 
         seed_overlap = len(seed_terms.intersection(candidate_terms))
-        explicit_overlap = len(
-            set(term.casefold() for term in criteria.include_terms + criteria.preferred_terms).intersection(
-                candidate_terms
-            )
+        explicit_overlap = sum(
+            1 for term in criteria.include_terms + criteria.preferred_terms
+            if term.casefold() in candidate_text_blob
         )
         text_component = (
             criteria.text_weight

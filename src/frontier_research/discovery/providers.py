@@ -19,6 +19,8 @@ from frontier_research.discovery.models import (
 )
 
 
+SEMANTIC_SCHOLAR_PROVIDER_NAME = "semantic_scholar"
+
 SEMANTIC_SCHOLAR_FIELDS = (
     "paperId,title,abstract,authors,venue,year,citationCount,externalIds,url,"
     "openAccessPdf,fieldsOfStudy,tldr"
@@ -64,7 +66,7 @@ class ProviderRequestError(Exception):
 @dataclass(slots=True)
 class SemanticScholarMetadataProvider:
     timeout_seconds: float = 15.0
-    provider_name: str = "semantic_scholar"
+    provider_name: str = SEMANTIC_SCHOLAR_PROVIDER_NAME
 
     def fetch_minimal_paper(self, identifier: str, role: PaperRole) -> PaperMetadata:
         encoded_identifier = quote(identifier, safe="")
@@ -278,6 +280,8 @@ def normalize_semantic_scholar_paper(
         for key, value in external_ids_payload.items():
             if isinstance(key, str) and isinstance(value, str) and value.strip():
                 external_ids[key] = value.strip()
+        if not external_ids:
+            missing_fields["external_ids"] = MissingFieldReason.EMPTY_VALUE
     elif external_ids_payload is None:
         missing_fields["external_ids"] = MissingFieldReason.NOT_PROVIDED
     else:
@@ -331,12 +335,16 @@ def normalize_semantic_scholar_paper(
     else:
         provider_paper_id = provider_paper_id.strip()
 
+    citation_count = maybe_int("citationCount")
+    if "citationCount" in missing_fields:
+        missing_fields["citation_count"] = missing_fields.pop("citationCount")
+
     provider_url = maybe_text("url")
     if "url" in missing_fields:
         missing_fields["provider_url"] = missing_fields.pop("url")
 
     return PaperMetadata(
-        provider="semantic_scholar",
+        provider=SEMANTIC_SCHOLAR_PROVIDER_NAME,
         role=role,
         provider_paper_id=provider_paper_id,
         title=maybe_text("title"),
@@ -344,7 +352,7 @@ def normalize_semantic_scholar_paper(
         authors=authors,
         venue=maybe_text("venue"),
         year=maybe_int("year"),
-        citation_count=maybe_int("citationCount"),
+        citation_count=citation_count,
         external_ids=external_ids,
         provider_url=provider_url,
         open_access_pdf_url=open_access_pdf_url,
@@ -365,14 +373,16 @@ def normalize_semantic_scholar_edge(
     if candidate_paper_id is None:
         return None
 
+    raw_contexts = payload.get("contexts")
     contexts = [
         item.strip()
-        for item in payload.get("contexts", [])
+        for item in (raw_contexts if isinstance(raw_contexts, list) else [])
         if isinstance(item, str) and item.strip()
     ]
+    raw_intents = payload.get("intents")
     intents = [
         item.strip()
-        for item in payload.get("intents", [])
+        for item in (raw_intents if isinstance(raw_intents, list) else [])
         if isinstance(item, str) and item.strip()
     ]
     is_influential = payload.get("isInfluential")
