@@ -76,3 +76,26 @@ When criteria are provided, candidate artifacts also include:
 - validated `criteria`
 - per-candidate `score` objects with component scores and explanation strings
 - `warnings` for candidates filtered out by the criteria
+
+## Demo Vertical Slice (NEI-289)
+
+A self-contained demo discovery CLI with an in-repo deterministic provider is also available:
+
+```bash
+frontier-research discover \
+  --paper paper:attention \
+  --concept retrieval \
+  --question "Which papers connect retrieval with agent memory?" \
+  --forward-depth 1 \
+  --reverse-depth 1 \
+  --must-match retrieval \
+  --max-candidates 5
+```
+
+The demo provider runs end to end without external API setup.
+
+## Test
+
+```bash
+python -m pytest
+```

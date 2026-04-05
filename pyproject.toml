@@ -15,6 +15,7 @@ dev = ["pytest>=8.0.0"]
 
 [project.scripts]
 frontier-discovery = "frontier_research.discovery.cli:main"
+frontier-research = "frontier_research.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -24,3 +25,4 @@ package-dir = {"" = "src"}
 
 [tool.setuptools.packages.find]
 where = ["src"]
+include = ["frontier_research*"]
