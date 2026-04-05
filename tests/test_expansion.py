@@ -129,8 +129,20 @@ def test_expand_deduplicates_candidates_and_edges_across_seed_neighborhoods() ->
         reverse_limit=0,
     )
 
-    assert [seed.provider_paper_id for seed in run.seeds] == ["seed-a", "seed-b"]
-    assert [candidate.provider_paper_id for candidate in run.candidates] == ["cand-1"]
+    assert run.run_metadata.request.to_dict() == {
+        "identifiers": ["seed-a", "seed-b"],
+        "forward_limit": 5,
+        "reverse_limit": 0,
+    }
+    assert [seed.paper.provider_paper_id for seed in run.seeds] == ["seed-a", "seed-b"]
+    assert [candidate.paper.provider_paper_id for candidate in run.candidates] == ["cand-1"]
+    assert {
+        (entry.seed_paper_id, entry.direction.value)
+        for entry in run.candidates[0].provenance
+    } == {
+        ("seed-a", "forward"),
+        ("seed-b", "forward"),
+    }
     assert {
         (edge.seed_paper_id, edge.source_paper_id, edge.target_paper_id)
         for edge in run.edges
@@ -188,7 +200,7 @@ def test_expand_keeps_partial_results_when_one_direction_fails() -> None:
         reverse_limit=3,
     )
 
-    assert [candidate.provider_paper_id for candidate in run.candidates] == ["cand-2"]
+    assert [candidate.paper.provider_paper_id for candidate in run.candidates] == ["cand-2"]
     assert [(edge.source_paper_id, edge.target_paper_id) for edge in run.edges] == [
         ("cand-2", "seed-a")
     ]
@@ -196,4 +208,5 @@ def test_expand_keeps_partial_results_when_one_direction_fails() -> None:
         "provider_throttled",
         "provider_partial_result",
     ]
+    assert run.run_metadata.partial_failure is True
 

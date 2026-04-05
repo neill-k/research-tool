@@ -183,3 +183,63 @@ def test_rank_candidates_filters_scores_and_explains_ranking() -> None:
         "criteria_filtered_candidate"
     ]
     assert "matched excluded term(s): symbolic" in filtered_warnings[0].message
+
+
+def test_expand_embeds_scores_in_candidate_artifacts() -> None:
+    seed = build_paper("seed-a", role=PaperRole.SEED, title="Neural retrieval ranking")
+    candidate = build_candidate(
+        "cand-top",
+        title="Neural ranking systems",
+        abstract="Improves neural retrieval for ranking tasks.",
+        authors=["Grace Hopper"],
+        venue="NeurIPS",
+        year=2025,
+        citation_count=25,
+        fields_of_study=["Computer Science", "Machine Learning"],
+    )
+
+    criteria = parse_criteria(
+        {
+            "include_terms": ["retrieval"],
+            "preferred_terms": ["ranking"],
+        }
+    )
+    provider = FakeProvider(
+        seeds={"seed-a": seed},
+        references={
+            "seed-a": build_expansion(
+                candidate_papers=[candidate],
+                edges=[
+                    build_edge(
+                        direction=CitationDirection.FORWARD,
+                        seed_paper_id="seed-a",
+                        candidate_paper_id="cand-top",
+                    )
+                ],
+            )
+        },
+        citations={"seed-a": build_expansion(candidate_papers=[], edges=[])},
+    )
+
+    run = DiscoveryService(provider=provider).expand(
+        identifiers=["seed-a"],
+        forward_limit=1,
+        reverse_limit=0,
+        criteria=criteria,
+        criteria_source="criteria.json",
+    )
+
+    assert run.run_metadata.request.criteria_source == "criteria.json"
+    assert [candidate.paper.provider_paper_id for candidate in run.candidates] == [
+        "cand-top"
+    ]
+    assert run.candidates[0].score is not None
+    assert run.to_dict()["candidates"][0]["score"]["total"] == run.candidates[0].score.total
+
+
+def build_expansion(
+    *, candidate_papers: list[PaperMetadata], edges: list[CitationEdge]
+):
+    from frontier_research.discovery.models import CitationExpansion
+
+    return CitationExpansion(papers=candidate_papers, edges=edges)

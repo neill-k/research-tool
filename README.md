@@ -2,7 +2,7 @@
 
 Frontier Research is a researcher-controlled operating system for literature discovery, triage, synthesis, and experiment planning.
 
-This repository currently includes the first discovery slices for `NEI-292` and `NEI-293`: minimal metadata extraction plus bidirectional citation expansion that normalizes abstract-visible paper metadata into a stable JSON shape for both seed papers and discovered candidates.
+This repository currently includes the first discovery slices for `NEI-292`, `NEI-293`, `NEI-294`, and `NEI-295`: minimal metadata extraction, bidirectional citation expansion, researcher-defined ranking criteria, and stable discovery artifacts for downstream scout and review workflows.
 
 ## Install
 
@@ -26,10 +26,11 @@ Expand forward references and reverse citations from one or more resolved seed p
 frontier-discovery expand 10.1145/3442188.3445922 --forward-limit 5 --reverse-limit 5
 ```
 
-The expansion output includes:
+The default JSON artifact includes:
 
-- normalized `seeds`
-- deduplicated `candidates`
+- `run_metadata` with request inputs, generation time, counts, and partial-failure flag
+- resolved `seeds` with explicit provenance
+- deduplicated `candidates` with explicit citation provenance
 - `edges` with citation `direction`, contexts, intents, and source provenance
 - `warnings` for throttling, partial provider responses, and direction-specific failures
 
@@ -37,6 +38,18 @@ Researchers can also provide explicit filtering and ranking criteria with `--cri
 
 ```bash
 frontier-discovery expand 10.1145/3442188.3445922 --criteria-file criteria.json
+```
+
+For direct CLI review, the same run can be rendered as readable text instead of JSON:
+
+```bash
+frontier-discovery expand 10.1145/3442188.3445922 --criteria-file criteria.json --output-format text
+```
+
+Artifacts can also be written to disk for downstream tooling:
+
+```bash
+frontier-discovery expand 10.1145/3442188.3445922 --criteria-file criteria.json --output-file artifacts/discovery-run.json
 ```
 
 Example criteria payload:
@@ -54,8 +67,8 @@ Example criteria payload:
 }
 ```
 
-When criteria are provided, the output also includes:
+When criteria are provided, candidate artifacts also include:
 
 - validated `criteria`
-- `ranked_candidates` with component scores and explanation strings
+- per-candidate `score` objects with component scores and explanation strings
 - `warnings` for candidates filtered out by the criteria

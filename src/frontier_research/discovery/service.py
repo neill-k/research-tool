@@ -1,15 +1,23 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from math import log1p
 import re
 
 from frontier_research.discovery.models import (
     CandidateScore,
     CitationDirection,
+    DiscoveryCandidateArtifact,
+    DiscoveryCandidateProvenance,
     CitationEdge,
     DiscoveryCriteria,
+    DiscoveryRequest,
     DiscoveryRun,
+    DiscoveryRunMetadata,
+    DiscoverySeedArtifact,
+    DiscoverySeedProvenance,
+    SeedSourceKind,
     DiscoveryWarning,
     PaperMetadata,
     PaperRole,
@@ -42,7 +50,9 @@ class DiscoveryService:
         forward_limit: int,
         reverse_limit: int,
         criteria: DiscoveryCriteria | None = None,
+        criteria_source: str | None = None,
     ) -> DiscoveryRun:
+        seed_identifier_by_key: dict[str, str] = {}
         seeds_by_key: dict[str, PaperMetadata] = {}
         candidates_by_key: dict[str, PaperMetadata] = {}
         edges_by_key: dict[tuple[str, str, str, str, str], CitationEdge] = {}
@@ -63,6 +73,7 @@ class DiscoveryService:
 
             seed_key = self._paper_key(seed)
             seeds_by_key[seed_key] = seed
+            seed_identifier_by_key.setdefault(seed_key, identifier)
 
             directions: list[tuple[CitationDirection, int]] = []
             if forward_limit > 0:
@@ -119,13 +130,59 @@ class DiscoveryService:
             warnings.extend(criteria_warnings)
             candidates = [candidate.paper for candidate in ranked_candidates]
 
+        candidate_scores = {
+            candidate.paper.provider_paper_id or self._paper_key(candidate.paper): candidate.score
+            for candidate in ranked_candidates
+        }
+        candidate_provenance_by_id = self._candidate_provenance(edges)
+
+        seed_artifacts = [
+            DiscoverySeedArtifact(
+                paper=seed,
+                provenance=DiscoverySeedProvenance(
+                    source_kind=SeedSourceKind.DIRECT_INPUT,
+                    input_identifier=seed_identifier_by_key[self._paper_key(seed)],
+                ),
+            )
+            for seed in seeds_by_key.values()
+        ]
+        candidate_artifacts = [
+            DiscoveryCandidateArtifact(
+                paper=candidate,
+                provenance=candidate_provenance_by_id.get(
+                    candidate.provider_paper_id or "",
+                    [],
+                ),
+                score=candidate_scores.get(
+                    candidate.provider_paper_id or self._paper_key(candidate)
+                ),
+            )
+            for candidate in candidates
+        ]
+
+        metadata = DiscoveryRunMetadata(
+            provider=self.provider.provider_name,
+            generated_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            request=DiscoveryRequest(
+                identifiers=list(identifiers),
+                forward_limit=forward_limit,
+                reverse_limit=reverse_limit,
+                criteria_source=criteria_source,
+            ),
+            seed_count=len(seed_artifacts),
+            candidate_count=len(candidate_artifacts),
+            edge_count=len(edges),
+            warning_count=len(warnings),
+            partial_failure=bool(warnings),
+        )
+
         return DiscoveryRun(
-            seeds=list(seeds_by_key.values()),
-            candidates=candidates,
+            run_metadata=metadata,
+            seeds=seed_artifacts,
+            candidates=candidate_artifacts,
             edges=edges,
             warnings=warnings,
             criteria=criteria,
-            ranked_candidates=ranked_candidates,
         )
 
     def rank_candidates(
@@ -244,6 +301,37 @@ class DiscoveryService:
             seed_identifier=identifier,
             seed_paper_id=seed_paper_id,
         )
+
+    def _candidate_provenance(
+        self, edges: list[CitationEdge]
+    ) -> dict[str, list[DiscoveryCandidateProvenance]]:
+        provenance_by_candidate: dict[str, dict[tuple[str, str, str, str, str], DiscoveryCandidateProvenance]] = {}
+        for edge in edges:
+            candidate_id = (
+                edge.target_paper_id
+                if edge.direction is CitationDirection.FORWARD
+                else edge.source_paper_id
+            )
+            provenance = DiscoveryCandidateProvenance(
+                seed_paper_id=edge.seed_paper_id,
+                source_paper_id=edge.source_paper_id,
+                target_paper_id=edge.target_paper_id,
+                direction=edge.direction,
+                source_provenance=edge.source_provenance,
+            )
+            edge_key = (
+                provenance.seed_paper_id,
+                provenance.source_paper_id,
+                provenance.target_paper_id,
+                provenance.direction.value,
+                provenance.source_provenance,
+            )
+            provenance_by_candidate.setdefault(candidate_id, {})[edge_key] = provenance
+
+        return {
+            candidate_id: list(entries.values())
+            for candidate_id, entries in provenance_by_candidate.items()
+        }
 
     def _seed_terms(self, seeds: list[PaperMetadata]) -> set[str]:
         tokens: set[str] = set()

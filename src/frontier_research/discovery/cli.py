@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from frontier_research.discovery.models import PaperRole
+from frontier_research.discovery.models import DiscoveryRun, PaperRole
 from frontier_research.discovery.providers import SemanticScholarMetadataProvider
 from frontier_research.discovery.service import (
     CriteriaValidationError,
@@ -57,7 +57,74 @@ def build_parser() -> argparse.ArgumentParser:
         "--criteria-file",
         help="Path to a JSON file that defines filtering and ranking criteria.",
     )
+    expand_parser.add_argument(
+        "--output-format",
+        choices=["json", "text"],
+        default="json",
+        help="Emit a machine-readable JSON artifact or a readable text summary.",
+    )
+    expand_parser.add_argument(
+        "--output-file",
+        help="Optional destination path for the rendered artifact.",
+    )
     return parser
+
+
+def render_run(run: DiscoveryRun, *, output_format: str) -> str:
+    if output_format == "json":
+        return json.dumps(run.to_dict(), indent=2, sort_keys=True)
+    return render_text_run(run)
+
+
+def render_text_run(run: DiscoveryRun) -> str:
+    lines = [
+        "Discovery Run",
+        f"Provider: {run.run_metadata.provider}",
+        f"Generated At: {run.run_metadata.generated_at}",
+        "Request: "
+        + ", ".join(run.run_metadata.request.identifiers)
+        + f" (forward={run.run_metadata.request.forward_limit}, reverse={run.run_metadata.request.reverse_limit})",
+        f"Seeds: {run.run_metadata.seed_count}",
+        f"Candidates: {run.run_metadata.candidate_count}",
+        f"Edges: {run.run_metadata.edge_count}",
+        f"Warnings: {run.run_metadata.warning_count}",
+    ]
+    if run.run_metadata.request.criteria_source:
+        lines.append(f"Criteria Source: {run.run_metadata.request.criteria_source}")
+
+    lines.append("")
+    lines.append("Resolved Seeds")
+    for seed in run.seeds:
+        title = seed.paper.title or seed.paper.provider_paper_id or "<untitled>"
+        lines.append(
+            f"- {title} [{seed.provenance.source_kind.value}: {seed.provenance.input_identifier}]"
+        )
+
+    lines.append("")
+    lines.append("Candidates")
+    if not run.candidates:
+        lines.append("- None")
+    for candidate in run.candidates:
+        title = candidate.paper.title or candidate.paper.provider_paper_id or "<untitled>"
+        if candidate.score is not None:
+            lines.append(f"- {title} (score={candidate.score.total:.4f})")
+        else:
+            lines.append(f"- {title}")
+        for provenance in candidate.provenance:
+            lines.append(
+                "  via "
+                f"{provenance.direction.value} citation from seed {provenance.seed_paper_id}"
+            )
+        if candidate.score is not None and candidate.score.reasons:
+            lines.append("  reasons: " + "; ".join(candidate.score.reasons))
+
+    if run.warnings:
+        lines.append("")
+        lines.append("Warnings")
+        for warning in run.warnings:
+            lines.append(f"- {warning.code}: {warning.message}")
+
+    return "\n".join(lines)
 
 
 def main() -> int:
@@ -92,8 +159,13 @@ def main() -> int:
             forward_limit=args.forward_limit,
             reverse_limit=args.reverse_limit,
             criteria=criteria,
+            criteria_source=args.criteria_file,
         )
-        print(json.dumps(run.to_dict(), indent=2, sort_keys=True))
+        rendered = render_run(run, output_format=args.output_format)
+        if args.output_file:
+            Path(args.output_file).write_text(rendered + "\n", encoding="utf-8")
+        else:
+            print(rendered)
         return 0
 
     parser.error(f"Unsupported command: {args.command}")

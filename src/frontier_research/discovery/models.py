@@ -19,6 +19,11 @@ class CitationDirection(StrEnum):
     REVERSE = "reverse"
 
 
+class SeedSourceKind(StrEnum):
+    DIRECT_INPUT = "direct_input"
+    SEARCH_DERIVED = "search_derived"
+
+
 @dataclass(slots=True, frozen=True)
 class AuthorSummary:
     name: str
@@ -87,6 +92,60 @@ class DiscoveryWarning:
 
 
 @dataclass(slots=True, frozen=True)
+class DiscoverySeedProvenance:
+    source_kind: SeedSourceKind
+    input_identifier: str
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "source_kind": self.source_kind.value,
+            "input_identifier": self.input_identifier,
+        }
+
+
+@dataclass(slots=True, frozen=True)
+class DiscoveryCandidateProvenance:
+    seed_paper_id: str
+    source_paper_id: str
+    target_paper_id: str
+    direction: CitationDirection
+    source_provenance: str
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        payload["direction"] = self.direction.value
+        return payload
+
+
+@dataclass(slots=True, frozen=True)
+class DiscoverySeedArtifact:
+    paper: PaperMetadata
+    provenance: DiscoverySeedProvenance
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "paper": self.paper.to_dict(),
+            "provenance": self.provenance.to_dict(),
+        }
+
+
+@dataclass(slots=True, frozen=True)
+class DiscoveryCandidateArtifact:
+    paper: PaperMetadata
+    provenance: list[DiscoveryCandidateProvenance]
+    score: "CandidateScore | None" = None
+
+    def to_dict(self) -> dict[str, object]:
+        payload = {
+            "paper": self.paper.to_dict(),
+            "provenance": [entry.to_dict() for entry in self.provenance],
+        }
+        if self.score is not None:
+            payload["score"] = self.score.to_dict()
+        return payload
+
+
+@dataclass(slots=True, frozen=True)
 class CitationExpansion:
     papers: list[PaperMetadata]
     edges: list[CitationEdge]
@@ -146,25 +205,53 @@ class RankedCandidate:
 
 
 @dataclass(slots=True, frozen=True)
+class DiscoveryRequest:
+    identifiers: list[str]
+    forward_limit: int
+    reverse_limit: int
+    criteria_source: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        if self.criteria_source is None:
+            payload.pop("criteria_source")
+        return payload
+
+
+@dataclass(slots=True, frozen=True)
+class DiscoveryRunMetadata:
+    provider: str
+    generated_at: str
+    request: DiscoveryRequest
+    seed_count: int
+    candidate_count: int
+    edge_count: int
+    warning_count: int
+    partial_failure: bool
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        payload["request"] = self.request.to_dict()
+        return payload
+
+
+@dataclass(slots=True, frozen=True)
 class DiscoveryRun:
-    seeds: list[PaperMetadata]
-    candidates: list[PaperMetadata]
+    run_metadata: DiscoveryRunMetadata
+    seeds: list[DiscoverySeedArtifact]
+    candidates: list[DiscoveryCandidateArtifact]
     edges: list[CitationEdge]
     warnings: list[DiscoveryWarning] = field(default_factory=list)
     criteria: DiscoveryCriteria | None = None
-    ranked_candidates: list[RankedCandidate] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         payload = {
-            "seeds": [paper.to_dict() for paper in self.seeds],
-            "candidates": [paper.to_dict() for paper in self.candidates],
+            "run_metadata": self.run_metadata.to_dict(),
+            "seeds": [seed.to_dict() for seed in self.seeds],
+            "candidates": [candidate.to_dict() for candidate in self.candidates],
             "edges": [edge.to_dict() for edge in self.edges],
             "warnings": [warning.to_dict() for warning in self.warnings],
         }
         if self.criteria is not None:
             payload["criteria"] = self.criteria.to_dict()
-        if self.ranked_candidates:
-            payload["ranked_candidates"] = [
-                candidate.to_dict() for candidate in self.ranked_candidates
-            ]
         return payload
