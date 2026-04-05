@@ -78,8 +78,8 @@ There are no positional arguments after `frontier discover run`. All researcher 
 | `--max-candidates <n>` | integer | no | no | Hard cap on returned candidate papers after scoring and filtering. Default `50`. |
 | `--provider <name>` | string | no | no | Discovery provider override. If omitted, use workspace default. |
 | `--format <mode>` | enum | no | no | Terminal output mode: `text`, `json`, or `jsonl`. Default `text`. |
-| `--output <path>` | path | no | no | Write the canonical run output to a file instead of stdout. |
-| `--run-id <id>` | string | no | no | Caller-supplied run identifier for reproducible automation and retries. |
+| `--output <path>` | path | no | no | Write the selected rendering (per `--format`) to a file instead of stdout. The canonical run JSON is always persisted separately to `.frontier/runs/{run-id}.json`. |
+| `--run-id <id>` | string | no | no | Caller-supplied run identifier for reproducible automation and retries. Must match `[A-Za-z0-9_\-\.]+` (no path separators or shell-special characters). If omitted, a timestamp-based ID is generated. |
 
 ### Validation rules
 
@@ -87,7 +87,7 @@ There are no positional arguments after `frontier discover run`. All researcher 
 - `--expand` is required because citation expansion is an intentional researcher choice.
 - `--max-hops` must be greater than or equal to `0`.
 - `--max-candidates` must be greater than `0`.
-- `--format jsonl` is valid only when rendering a candidate-oriented projection; the underlying canonical run document still exists as structured JSON.
+- `--format jsonl` is valid only when rendering a candidate-oriented projection; the underlying canonical run document still exists as structured JSON. Each JSONL line is a JSON object representing one candidate with the shape `{"paper_id": "...", "title": "...", "score": 0.82, "reasons": [...], "reached_from_seed_ids": [...]}`. Fields map directly from the canonical `candidates[]` records.
 - If `--output` is omitted, the command writes the selected rendering to stdout and still persists the canonical run document in `.frontier/runs/{run-id}.json`.
 
 ## Canonical Run Schema
@@ -142,14 +142,47 @@ Every invocation emits one canonical JSON document with the following top-level 
       "max_candidates": 50
     }
   },
-  "resolved_seeds": [],
+  "resolved_seeds": [
+    {
+      "seed_id": "seed_01",
+      "source_input": {
+        "input": "doi:10.48550/arXiv.1706.03762",
+        "input_type": "paper"
+      },
+      "resolution_kind": "direct_paper",
+      "paper": {
+        "paper_id": "s2:204e3073870fae3d05bcbc2f6a8e263d9b72e776",
+        "title": "Attention Is All You Need"
+      },
+      "provenance": {
+        "provider": "semantic-scholar",
+        "matched_by": "doi"
+      }
+    },
+    {
+      "seed_id": "seed_02",
+      "source_input": {
+        "input": "Which recent papers challenge chain-of-thought gains on hard reasoning benchmarks?",
+        "input_type": "question"
+      },
+      "resolution_kind": "search_derived",
+      "paper": {
+        "paper_id": "s2:def456",
+        "title": "Evaluating Chain-of-Thought Reasoning in LLMs"
+      },
+      "provenance": {
+        "provider": "semantic-scholar",
+        "matched_by": "relevance_search"
+      }
+    }
+  ],
   "candidates": [],
   "citation_edges": [],
   "warnings": [],
   "errors": [],
   "stats": {
     "seed_count": 2,
-    "resolved_seed_count": 0,
+    "resolved_seed_count": 2,
     "candidate_count": 0,
     "citation_edge_count": 0
   },
@@ -403,6 +436,7 @@ This invocation demonstrates the expected workflow:
 ## Output Persistence Rules
 
 - The canonical run document persists to `.frontier/runs/{run-id}.json`.
+- `--run-id` values are validated against `[A-Za-z0-9_\-\.]+` before use in file paths. Path separators (`/`, `\`), shell metacharacters, and empty strings are rejected with a user-facing error. When `--run-id` is omitted, the CLI generates a timestamp-based identifier that satisfies these rules.
 - If `--output` is supplied with `--format json`, the written file may be byte-for-byte identical to the canonical run document.
 - If `--format text` or `--format jsonl` is selected, the persisted `.frontier/runs/{run-id}.json` remains the source of truth and the requested output is a derived rendering.
 
