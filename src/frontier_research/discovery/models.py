@@ -101,16 +101,70 @@ class CitationExpansion:
 
 
 @dataclass(slots=True, frozen=True)
+class DiscoveryCriteria:
+    include_terms: list[str] = field(default_factory=list)
+    exclude_terms: list[str] = field(default_factory=list)
+    preferred_terms: list[str] = field(default_factory=list)
+    preferred_authors: list[str] = field(default_factory=list)
+    preferred_venues: list[str] = field(default_factory=list)
+    preferred_fields_of_study: list[str] = field(default_factory=list)
+    min_year: int | None = None
+    max_year: int | None = None
+    min_citation_count: int | None = None
+    text_weight: float = 1.0
+    citation_weight: float = 0.35
+    recency_weight: float = 0.25
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+@dataclass(slots=True, frozen=True)
+class CandidateScore:
+    total: float
+    components: dict[str, float]
+    reasons: list[str]
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "total": self.total,
+            "components": dict(self.components),
+            "reasons": list(self.reasons),
+        }
+
+
+@dataclass(slots=True, frozen=True)
+class RankedCandidate:
+    paper: PaperMetadata
+    score: CandidateScore
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "paper": self.paper.to_dict(),
+            "score": self.score.to_dict(),
+        }
+
+
+@dataclass(slots=True, frozen=True)
 class DiscoveryRun:
     seeds: list[PaperMetadata]
     candidates: list[PaperMetadata]
     edges: list[CitationEdge]
     warnings: list[DiscoveryWarning] = field(default_factory=list)
+    criteria: DiscoveryCriteria | None = None
+    ranked_candidates: list[RankedCandidate] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
-        return {
+        payload = {
             "seeds": [paper.to_dict() for paper in self.seeds],
             "candidates": [paper.to_dict() for paper in self.candidates],
             "edges": [edge.to_dict() for edge in self.edges],
             "warnings": [warning.to_dict() for warning in self.warnings],
         }
+        if self.criteria is not None:
+            payload["criteria"] = self.criteria.to_dict()
+        if self.ranked_candidates:
+            payload["ranked_candidates"] = [
+                candidate.to_dict() for candidate in self.ranked_candidates
+            ]
+        return payload

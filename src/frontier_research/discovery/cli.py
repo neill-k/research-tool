@@ -2,10 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 from frontier_research.discovery.models import PaperRole
 from frontier_research.discovery.providers import SemanticScholarMetadataProvider
-from frontier_research.discovery.service import DiscoveryService
+from frontier_research.discovery.service import (
+    CriteriaValidationError,
+    DiscoveryService,
+    parse_criteria,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -48,6 +53,10 @@ def build_parser() -> argparse.ArgumentParser:
         default=10,
         help="Maximum number of reverse citations to fetch per seed paper.",
     )
+    expand_parser.add_argument(
+        "--criteria-file",
+        help="Path to a JSON file that defines filtering and ranking criteria.",
+    )
     return parser
 
 
@@ -64,10 +73,25 @@ def main() -> int:
     if args.command == "expand":
         if args.forward_limit < 0 or args.reverse_limit < 0:
             parser.error("--forward-limit and --reverse-limit must be >= 0.")
+        criteria = None
+        if args.criteria_file:
+            try:
+                criteria = parse_criteria(
+                    json.loads(Path(args.criteria_file).read_text(encoding="utf-8"))
+                )
+            except FileNotFoundError:
+                parser.error(f"Criteria file not found: {args.criteria_file}")
+            except json.JSONDecodeError as exc:
+                parser.error(
+                    f"Criteria file must contain valid JSON: {exc.msg} at line {exc.lineno}"
+                )
+            except CriteriaValidationError as exc:
+                parser.error(f"Invalid discovery criteria: {exc}")
         run = service.expand(
             identifiers=args.identifiers,
             forward_limit=args.forward_limit,
             reverse_limit=args.reverse_limit,
+            criteria=criteria,
         )
         print(json.dumps(run.to_dict(), indent=2, sort_keys=True))
         return 0

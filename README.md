@@ -32,3 +32,30 @@ The expansion output includes:
 - deduplicated `candidates`
 - `edges` with citation `direction`, contexts, intents, and source provenance
 - `warnings` for throttling, partial provider responses, and direction-specific failures
+
+Researchers can also provide explicit filtering and ranking criteria with `--criteria-file`:
+
+```bash
+frontier-discovery expand 10.1145/3442188.3445922 --criteria-file criteria.json
+```
+
+Example criteria payload:
+
+```json
+{
+  "include_terms": ["retrieval"],
+  "exclude_terms": ["survey"],
+  "preferred_terms": ["ranking", "neural"],
+  "preferred_authors": ["Ada Lovelace"],
+  "preferred_venues": ["NeurIPS"],
+  "preferred_fields_of_study": ["Machine Learning"],
+  "min_year": 2021,
+  "min_citation_count": 10
+}
+```
+
+When criteria are provided, the output also includes:
+
+- validated `criteria`
+- `ranked_candidates` with component scores and explanation strings
+- `warnings` for candidates filtered out by the criteria
