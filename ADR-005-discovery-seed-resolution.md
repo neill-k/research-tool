@@ -137,7 +137,7 @@ After merge and deduplication, each unique paper becomes one `resolved_seed` rec
     "doi": "10.48550/arXiv.1706.03762",
     "arxiv_id": "1706.03762"
   },
-  "seed_kind": "direct",
+  "seed_kind": "mixed",
   "source_paths": [
     {
       "request_id": "req_01",
@@ -225,7 +225,7 @@ Seed resolution is allowed to be partially successful. Failures belong to the in
 
 ### Invalid inputs
 
-An input is invalid when it cannot be parsed or cannot produce any acceptable provider lookup or search result.
+An input is invalid when it cannot be parsed into a recognized identifier format, or when a provider lookup or transport failure prevents resolution. Empty search results from concept or question inputs are not invalid — they are warnings (see below).
 
 Example:
 
@@ -308,14 +308,13 @@ Resolution outcome summary:
 - the direct paper resolves to one canonical paper
 - the concept search returns that same paper plus two others
 - the question search returns one overlapping paper plus one new paper
-- one malformed paper identifier from another request would appear as an error without deleting the successful seeds
 
 Canonical result:
 
-- four `seed_requests`
-- three unique `resolved_seeds`
-- one merged seed marked `mixed`
-- one invalid-input error, if applicable
+- three `seed_requests` (one per CLI flag)
+- three unique `resolved_seeds` (after deduplication)
+- one merged seed marked `mixed` (the paper reached by both the direct identifier and the concept search)
+- zero errors in this example (all inputs resolved successfully)
 
 ## Options Considered
 
