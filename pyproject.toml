@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "frontier-research"
+version = "0.1.0"
+description = "Initial discovery CLI slice for Frontier Research."
+readme = "README.md"
+requires-python = ">=3.11"
+
+[project.scripts]
+frontier-research = "frontier_research.cli:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
