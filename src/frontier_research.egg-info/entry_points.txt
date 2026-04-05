@@ -1,0 +1,2 @@
+[console_scripts]
+frontier-discovery = frontier_research.discovery.cli:main

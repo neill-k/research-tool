@@ -103,10 +103,10 @@ class DemoDiscoveryProvider(DiscoveryProvider):
         raise ValueError(f"Unknown paper seed: {paper_input}")
 
     def search_papers(self, query: str, limit: int = 3) -> list[Paper]:
-        query_terms = _tokenize(query)
+        query_terms = tokenize(query)
         scored: list[tuple[int, int, Paper]] = []
         for paper in self.papers.values():
-            corpus_terms = set(_tokenize(" ".join([paper.title, paper.abstract, *paper.keywords])))
+            corpus_terms = set(tokenize(" ".join([paper.title, paper.abstract, *paper.keywords])))
             overlap = len(query_terms & corpus_terms)
             if overlap:
                 scored.append((overlap, paper.year, paper))
@@ -125,20 +125,22 @@ class DemoDiscoveryProvider(DiscoveryProvider):
         return f"{target_paper_id} is cited by {source_paper_id} in the demo citation graph"
 
 
-def _tokenize(text: str) -> set[str]:
-    stopwords = {
-        "and",
-        "for",
-        "the",
-        "with",
-        "that",
-        "this",
-        "from",
-        "which",
-        "into",
-    }
+STOPWORDS = frozenset({
+    "and",
+    "for",
+    "the",
+    "with",
+    "that",
+    "this",
+    "from",
+    "which",
+    "into",
+})
+
+
+def tokenize(text: str) -> set[str]:
     return {
         part
         for part in "".join(ch if ch.isalnum() else " " for ch in text.casefold()).split()
-        if len(part) > 2 and part not in stopwords
+        if len(part) > 2 and part not in STOPWORDS
     }

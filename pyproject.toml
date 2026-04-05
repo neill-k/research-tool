@@ -12,5 +12,8 @@ requires-python = ">=3.11"
 [project.scripts]
 frontier-research = "frontier_research.cli:main"
 
+[tool.setuptools.packages.find]
+include = ["frontier_research*"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]

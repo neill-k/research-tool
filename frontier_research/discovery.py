@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 
 from frontier_research.models import CitationEdge, DiscoveryRequest, DiscoveryResult, RankedCandidate, ResolvedSeed
-from frontier_research.providers import DiscoveryProvider, _tokenize
+from frontier_research.providers import DiscoveryProvider, tokenize
 
 
 def run_discovery(request: DiscoveryRequest, provider: DiscoveryProvider) -> DiscoveryResult:
@@ -130,7 +130,7 @@ def _rank_candidates(
             continue
 
         haystack = " ".join([paper.title, paper.abstract, *paper.keywords])
-        terms = _tokenize(haystack)
+        terms = tokenize(haystack)
 
         if request.must_match and not all(term.casefold() in terms for term in [item.casefold() for item in request.must_match]):
             continue
@@ -173,9 +173,9 @@ def _rank_candidates(
 def _seed_terms(request: DiscoveryRequest, resolved_seeds: list[ResolvedSeed]) -> set[str]:
     direct_terms = set()
     for value in [*request.concept_inputs, *request.question_inputs]:
-        direct_terms.update(_tokenize(value))
+        direct_terms.update(tokenize(value))
     for seed in resolved_seeds:
-        direct_terms.update(_tokenize(seed.paper.title))
+        direct_terms.update(tokenize(seed.paper.title))
         direct_terms.update(seed.paper.keywords)
     return {term.casefold() for term in direct_terms}
 
