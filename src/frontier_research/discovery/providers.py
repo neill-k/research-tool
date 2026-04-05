@@ -9,6 +9,10 @@ from urllib.request import urlopen
 
 from frontier_research.discovery.models import (
     AuthorSummary,
+    CitationDirection,
+    CitationEdge,
+    CitationExpansion,
+    DiscoveryWarning,
     MissingFieldReason,
     PaperMetadata,
     PaperRole,
@@ -19,6 +23,18 @@ SEMANTIC_SCHOLAR_FIELDS = (
     "paperId,title,abstract,authors,venue,year,citationCount,externalIds,url,"
     "openAccessPdf,fieldsOfStudy,tldr"
 )
+SEMANTIC_SCHOLAR_REFERENCE_FIELDS = (
+    "contexts,intents,isInfluential,citedPaper.paperId,citedPaper.title,"
+    "citedPaper.abstract,citedPaper.authors,citedPaper.venue,citedPaper.year,"
+    "citedPaper.citationCount,citedPaper.externalIds,citedPaper.url,"
+    "citedPaper.openAccessPdf,citedPaper.fieldsOfStudy"
+)
+SEMANTIC_SCHOLAR_CITATION_FIELDS = (
+    "contexts,intents,isInfluential,citingPaper.paperId,citingPaper.title,"
+    "citingPaper.abstract,citingPaper.authors,citingPaper.venue,citingPaper.year,"
+    "citingPaper.citationCount,citingPaper.externalIds,citingPaper.url,"
+    "citingPaper.openAccessPdf,citingPaper.fieldsOfStudy"
+)
 
 
 class PaperMetadataProvider(Protocol):
@@ -26,6 +42,23 @@ class PaperMetadataProvider(Protocol):
 
     def fetch_minimal_paper(self, identifier: str, role: PaperRole) -> PaperMetadata:
         """Fetch a normalized paper metadata record."""
+
+    def expand_references(self, identifier: str, seed_paper_id: str, limit: int) -> CitationExpansion:
+        """Fetch references for a resolved seed paper."""
+
+    def expand_citations(self, identifier: str, seed_paper_id: str, limit: int) -> CitationExpansion:
+        """Fetch citations for a resolved seed paper."""
+
+
+@dataclass(slots=True, frozen=True)
+class ProviderRequestError(Exception):
+    message: str
+    provider: str
+    status_code: int | None = None
+    throttled: bool = False
+
+    def __str__(self) -> str:
+        return self.message
 
 
 @dataclass(slots=True)
@@ -35,23 +68,157 @@ class SemanticScholarMetadataProvider:
 
     def fetch_minimal_paper(self, identifier: str, role: PaperRole) -> PaperMetadata:
         encoded_identifier = quote(identifier, safe="")
-        url = (
-            "https://api.semanticscholar.org/graph/v1/paper/"
-            f"{encoded_identifier}?fields={SEMANTIC_SCHOLAR_FIELDS}"
+        payload = self._get_json(
+            f"/graph/v1/paper/{encoded_identifier}?fields={SEMANTIC_SCHOLAR_FIELDS}",
+            identifier=identifier,
         )
+        return normalize_semantic_scholar_paper(payload, role=role)
+
+    def expand_references(
+        self, identifier: str, seed_paper_id: str, limit: int
+    ) -> CitationExpansion:
+        return self._expand_direction(
+            identifier=identifier,
+            seed_paper_id=seed_paper_id,
+            direction=CitationDirection.FORWARD,
+            limit=limit,
+            path_suffix="references",
+            fields=SEMANTIC_SCHOLAR_REFERENCE_FIELDS,
+            nested_paper_key="citedPaper",
+        )
+
+    def expand_citations(
+        self, identifier: str, seed_paper_id: str, limit: int
+    ) -> CitationExpansion:
+        return self._expand_direction(
+            identifier=identifier,
+            seed_paper_id=seed_paper_id,
+            direction=CitationDirection.REVERSE,
+            limit=limit,
+            path_suffix="citations",
+            fields=SEMANTIC_SCHOLAR_CITATION_FIELDS,
+            nested_paper_key="citingPaper",
+        )
+
+    def _expand_direction(
+        self,
+        *,
+        identifier: str,
+        seed_paper_id: str,
+        direction: CitationDirection,
+        limit: int,
+        path_suffix: str,
+        fields: str,
+        nested_paper_key: str,
+    ) -> CitationExpansion:
+        if limit <= 0:
+            return CitationExpansion(papers=[], edges=[], warnings=[])
+
+        encoded_identifier = quote(identifier, safe="")
+        collected_papers: list[PaperMetadata] = []
+        collected_edges: list[CitationEdge] = []
+        warnings: list[DiscoveryWarning] = []
+        offset = 0
+
+        while len(collected_papers) < limit:
+            remaining = limit - len(collected_papers)
+            payload = self._get_json(
+                (
+                    f"/graph/v1/paper/{encoded_identifier}/{path_suffix}"
+                    f"?fields={fields}&offset={offset}&limit={min(remaining, 1000)}"
+                ),
+                identifier=identifier,
+            )
+            entries = payload.get("data")
+            if entries is None:
+                warnings.append(
+                    DiscoveryWarning(
+                        code="provider_partial_result",
+                        message=(
+                            f"Semantic Scholar returned no '{path_suffix}' list for seed "
+                            f"'{identifier}'."
+                        ),
+                        provider=self.provider_name,
+                        direction=direction,
+                        seed_identifier=identifier,
+                        seed_paper_id=seed_paper_id,
+                    )
+                )
+                break
+            if not isinstance(entries, list):
+                raise ProviderRequestError(
+                    message=(
+                        f"Semantic Scholar returned an unexpected '{path_suffix}' payload for "
+                        f"'{identifier}'."
+                    ),
+                    provider=self.provider_name,
+                )
+            if not entries:
+                break
+
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                nested_paper = entry.get(nested_paper_key)
+                if not isinstance(nested_paper, dict):
+                    continue
+                paper = normalize_semantic_scholar_paper(
+                    nested_paper,
+                    role=PaperRole.CANDIDATE,
+                )
+                edge = normalize_semantic_scholar_edge(
+                    entry,
+                    direction=direction,
+                    seed_paper_id=seed_paper_id,
+                    candidate_paper_id=paper.provider_paper_id,
+                    provider=self.provider_name,
+                )
+                if edge is None:
+                    continue
+                collected_papers.append(paper)
+                collected_edges.append(edge)
+                if len(collected_papers) >= limit:
+                    break
+
+            next_offset = payload.get("next")
+            if not isinstance(next_offset, int) or next_offset <= offset:
+                break
+            offset = next_offset
+
+        return CitationExpansion(
+            papers=collected_papers,
+            edges=collected_edges,
+            warnings=warnings,
+        )
+
+    def _get_json(self, path: str, *, identifier: str) -> dict[str, Any]:
+        url = f"https://api.semanticscholar.org{path}"
         try:
             with urlopen(url, timeout=self.timeout_seconds) as response:
                 payload = json.load(response)
         except HTTPError as exc:
-            raise RuntimeError(
-                f"Semantic Scholar request failed with HTTP {exc.code} for '{identifier}'."
+            raise ProviderRequestError(
+                message=(
+                    f"Semantic Scholar request failed with HTTP {exc.code} for "
+                    f"'{identifier}'."
+                ),
+                provider=self.provider_name,
+                status_code=exc.code,
+                throttled=exc.code == 429,
             ) from exc
         except URLError as exc:
-            raise RuntimeError(
-                f"Semantic Scholar request failed for '{identifier}': {exc.reason}."
+            raise ProviderRequestError(
+                message=(
+                    f"Semantic Scholar request failed for '{identifier}': {exc.reason}."
+                ),
+                provider=self.provider_name,
             ) from exc
-
-        return normalize_semantic_scholar_paper(payload, role=role)
+        if not isinstance(payload, dict):
+            raise ProviderRequestError(
+                message=f"Semantic Scholar returned a non-object payload for '{identifier}'.",
+                provider=self.provider_name,
+            )
+        return payload
 
 
 def normalize_semantic_scholar_paper(
@@ -184,4 +351,49 @@ def normalize_semantic_scholar_paper(
         fields_of_study=fields_of_study,
         tldr=tldr,
         missing_fields=missing_fields,
+    )
+
+
+def normalize_semantic_scholar_edge(
+    payload: dict[str, Any],
+    *,
+    direction: CitationDirection,
+    seed_paper_id: str,
+    candidate_paper_id: str | None,
+    provider: str,
+) -> CitationEdge | None:
+    if candidate_paper_id is None:
+        return None
+
+    contexts = [
+        item.strip()
+        for item in payload.get("contexts", [])
+        if isinstance(item, str) and item.strip()
+    ]
+    intents = [
+        item.strip()
+        for item in payload.get("intents", [])
+        if isinstance(item, str) and item.strip()
+    ]
+    is_influential = payload.get("isInfluential")
+    if not isinstance(is_influential, bool):
+        is_influential = None
+
+    if direction is CitationDirection.FORWARD:
+        source_paper_id = seed_paper_id
+        target_paper_id = candidate_paper_id
+    else:
+        source_paper_id = candidate_paper_id
+        target_paper_id = seed_paper_id
+
+    return CitationEdge(
+        provider=provider,
+        direction=direction,
+        source_paper_id=source_paper_id,
+        target_paper_id=target_paper_id,
+        seed_paper_id=seed_paper_id,
+        source_provenance="seed_citation_expansion",
+        contexts=contexts,
+        intents=intents,
+        is_influential=is_influential,
     )

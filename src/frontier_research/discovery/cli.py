@@ -5,7 +5,7 @@ import json
 
 from frontier_research.discovery.models import PaperRole
 from frontier_research.discovery.providers import SemanticScholarMetadataProvider
-from frontier_research.discovery.service import PaperMetadataService
+from frontier_research.discovery.service import DiscoveryService
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -26,18 +26,50 @@ def build_parser() -> argparse.ArgumentParser:
         default=PaperRole.SEED.value,
         help="Whether the paper is a seed or discovered candidate.",
     )
+
+    expand_parser = subparsers.add_parser(
+        "expand",
+        help="Expand forward references and reverse citations from resolved seed papers.",
+    )
+    expand_parser.add_argument(
+        "identifiers",
+        nargs="+",
+        help="One or more resolved paper identifiers accepted by the provider.",
+    )
+    expand_parser.add_argument(
+        "--forward-limit",
+        type=int,
+        default=10,
+        help="Maximum number of forward references to fetch per seed paper.",
+    )
+    expand_parser.add_argument(
+        "--reverse-limit",
+        type=int,
+        default=10,
+        help="Maximum number of reverse citations to fetch per seed paper.",
+    )
     return parser
 
 
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
+    provider = SemanticScholarMetadataProvider()
+    service = DiscoveryService(provider=provider)
 
     if args.command == "fetch":
-        provider = SemanticScholarMetadataProvider()
-        service = PaperMetadataService(provider=provider)
         metadata = service.fetch(identifier=args.identifier, role=PaperRole(args.role))
         print(json.dumps(metadata.to_dict(), indent=2, sort_keys=True))
+        return 0
+    if args.command == "expand":
+        if args.forward_limit < 0 or args.reverse_limit < 0:
+            parser.error("--forward-limit and --reverse-limit must be >= 0.")
+        run = service.expand(
+            identifiers=args.identifiers,
+            forward_limit=args.forward_limit,
+            reverse_limit=args.reverse_limit,
+        )
+        print(json.dumps(run.to_dict(), indent=2, sort_keys=True))
         return 0
 
     parser.error(f"Unsupported command: {args.command}")

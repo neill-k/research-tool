@@ -14,6 +14,11 @@ class PaperRole(StrEnum):
     CANDIDATE = "candidate"
 
 
+class CitationDirection(StrEnum):
+    FORWARD = "forward"
+    REVERSE = "reverse"
+
+
 @dataclass(slots=True, frozen=True)
 class AuthorSummary:
     name: str
@@ -45,3 +50,67 @@ class PaperMetadata:
             name: reason.value for name, reason in self.missing_fields.items()
         }
         return payload
+
+
+@dataclass(slots=True, frozen=True)
+class CitationEdge:
+    provider: str
+    direction: CitationDirection
+    source_paper_id: str
+    target_paper_id: str
+    seed_paper_id: str
+    source_provenance: str
+    contexts: list[str] = field(default_factory=list)
+    intents: list[str] = field(default_factory=list)
+    is_influential: bool | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        payload["direction"] = self.direction.value
+        return payload
+
+
+@dataclass(slots=True, frozen=True)
+class DiscoveryWarning:
+    code: str
+    message: str
+    provider: str
+    direction: CitationDirection | None = None
+    seed_identifier: str | None = None
+    seed_paper_id: str | None = None
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        if self.direction is not None:
+            payload["direction"] = self.direction.value
+        return payload
+
+
+@dataclass(slots=True, frozen=True)
+class CitationExpansion:
+    papers: list[PaperMetadata]
+    edges: list[CitationEdge]
+    warnings: list[DiscoveryWarning] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "papers": [paper.to_dict() for paper in self.papers],
+            "edges": [edge.to_dict() for edge in self.edges],
+            "warnings": [warning.to_dict() for warning in self.warnings],
+        }
+
+
+@dataclass(slots=True, frozen=True)
+class DiscoveryRun:
+    seeds: list[PaperMetadata]
+    candidates: list[PaperMetadata]
+    edges: list[CitationEdge]
+    warnings: list[DiscoveryWarning] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "seeds": [paper.to_dict() for paper in self.seeds],
+            "candidates": [paper.to_dict() for paper in self.candidates],
+            "edges": [edge.to_dict() for edge in self.edges],
+            "warnings": [warning.to_dict() for warning in self.warnings],
+        }

@@ -1,5 +1,8 @@
-from frontier_research.discovery.models import MissingFieldReason, PaperRole
-from frontier_research.discovery.providers import normalize_semantic_scholar_paper
+from frontier_research.discovery.models import CitationDirection, MissingFieldReason, PaperRole
+from frontier_research.discovery.providers import (
+    normalize_semantic_scholar_edge,
+    normalize_semantic_scholar_paper,
+)
 
 
 def test_normalization_keeps_same_shape_for_seed_and_candidate() -> None:
@@ -86,3 +89,26 @@ def test_normalization_discards_invalid_author_entries() -> None:
 
     assert [author.name for author in metadata.authors] == ["Grace Hopper"]
     assert metadata.missing_fields["tldr"] == MissingFieldReason.NOT_PROVIDED
+
+
+def test_edge_normalization_preserves_direction_and_context() -> None:
+    payload = {
+        "contexts": [" cited in passing ", None],
+        "intents": ["background", ""],
+        "isInfluential": True,
+    }
+
+    edge = normalize_semantic_scholar_edge(
+        payload,
+        direction=CitationDirection.REVERSE,
+        seed_paper_id="seed-1",
+        candidate_paper_id="cand-1",
+        provider="semantic_scholar",
+    )
+
+    assert edge is not None
+    assert edge.direction is CitationDirection.REVERSE
+    assert edge.source_paper_id == "cand-1"
+    assert edge.target_paper_id == "seed-1"
+    assert edge.contexts == ["cited in passing"]
+    assert edge.intents == ["background"]
