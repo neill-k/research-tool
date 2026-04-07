@@ -77,9 +77,9 @@ class DiscoveryService:
             seed_identifier_by_key.setdefault(seed_key, identifier)
 
             directions: list[tuple[CitationDirection, int]] = []
-            if forward_limit > 0:
+            if forward_limit >= 0:
                 directions.append((CitationDirection.FORWARD, forward_limit))
-            if reverse_limit > 0:
+            if reverse_limit >= 0:
                 directions.append((CitationDirection.REVERSE, reverse_limit))
 
             for direction, limit in directions:

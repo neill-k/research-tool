@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
+import re
+import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 from frontier_research.discovery.models import (
     AuthorSummary,
@@ -113,8 +116,9 @@ class SemanticScholarMetadataProvider:
         fields: str,
         nested_paper_key: str,
     ) -> CitationExpansion:
-        if limit <= 0:
+        if limit < 0:
             return CitationExpansion(papers=[], edges=[], warnings=[])
+        unlimited = limit == 0
 
         encoded_identifier = quote(identifier, safe="")
         collected_papers: list[PaperMetadata] = []
@@ -122,8 +126,8 @@ class SemanticScholarMetadataProvider:
         warnings: list[DiscoveryWarning] = []
         offset = 0
 
-        while len(collected_papers) < limit:
-            remaining = limit - len(collected_papers)
+        while unlimited or len(collected_papers) < limit:
+            remaining = 1000 if unlimited else limit - len(collected_papers)
             payload = self._get_json(
                 (
                     f"/graph/v1/paper/{encoded_identifier}/{path_suffix}"
@@ -179,7 +183,7 @@ class SemanticScholarMetadataProvider:
                     continue
                 collected_papers.append(paper)
                 collected_edges.append(edge)
-                if len(collected_papers) >= limit:
+                if not unlimited and len(collected_papers) >= limit:
                     break
 
             next_offset = payload.get("next")
@@ -195,26 +199,49 @@ class SemanticScholarMetadataProvider:
 
     def _get_json(self, path: str, *, identifier: str) -> dict[str, Any]:
         url = f"https://api.semanticscholar.org{path}"
-        try:
-            with urlopen(url, timeout=self.timeout_seconds) as response:
-                payload = json.load(response)
-        except HTTPError as exc:
+        api_key = os.environ.get("S2_API_KEY")
+        max_retries = 3
+        backoff = 5.0
+        last_exc: HTTPError | None = None
+        for attempt in range(max_retries):
+            req = Request(url)
+            if api_key:
+                req.add_header("x-api-key", api_key)
+            try:
+                with urlopen(req, timeout=self.timeout_seconds) as response:
+                    payload = json.load(response)
+                break
+            except HTTPError as exc:
+                if exc.code == 429:
+                    last_exc = exc
+                    time.sleep(backoff * (2 ** attempt))
+                    continue
+                raise ProviderRequestError(
+                    message=(
+                        f"Semantic Scholar request failed with HTTP {exc.code} for "
+                        f"'{identifier}'."
+                    ),
+                    provider=self.provider_name,
+                    status_code=exc.code,
+                    throttled=False,
+                ) from exc
+            except URLError as exc:
+                raise ProviderRequestError(
+                    message=(
+                        f"Semantic Scholar request failed for '{identifier}': {exc.reason}."
+                    ),
+                    provider=self.provider_name,
+                ) from exc
+        else:
             raise ProviderRequestError(
                 message=(
-                    f"Semantic Scholar request failed with HTTP {exc.code} for "
-                    f"'{identifier}'."
+                    f"Semantic Scholar request failed with HTTP {last_exc.code} for "
+                    f"'{identifier}' after {max_retries} retries."
                 ),
                 provider=self.provider_name,
-                status_code=exc.code,
-                throttled=exc.code == 429,
-            ) from exc
-        except URLError as exc:
-            raise ProviderRequestError(
-                message=(
-                    f"Semantic Scholar request failed for '{identifier}': {exc.reason}."
-                ),
-                provider=self.provider_name,
-            ) from exc
+                status_code=last_exc.code,
+                throttled=True,
+            ) from last_exc
         if not isinstance(payload, dict):
             raise ProviderRequestError(
                 message=f"Semantic Scholar returned a non-object payload for '{identifier}'.",

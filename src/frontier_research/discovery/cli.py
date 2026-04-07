@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
+from dataclasses import replace
 from pathlib import Path
 
-from frontier_research.discovery.models import DiscoveryRun, PaperRole
+from frontier_research.discovery.models import DiscoveryCandidateArtifact, DiscoveryRun, PaperRole
 from frontier_research.discovery.providers import SemanticScholarMetadataProvider
 from frontier_research.discovery.service import (
     CriteriaValidationError,
@@ -44,14 +45,14 @@ def build_parser() -> argparse.ArgumentParser:
     expand_parser.add_argument(
         "--forward-limit",
         type=int,
-        default=10,
-        help="Maximum number of forward references to fetch per seed paper.",
+        default=50,
+        help="Maximum number of forward references to fetch per seed paper. 0 = fetch all.",
     )
     expand_parser.add_argument(
         "--reverse-limit",
         type=int,
-        default=10,
-        help="Maximum number of reverse citations to fetch per seed paper.",
+        default=50,
+        help="Maximum number of reverse citations to fetch per seed paper. 0 = fetch all.",
     )
     expand_parser.add_argument(
         "--criteria-file",
@@ -67,7 +68,51 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-file",
         help="Optional destination path for the rendered artifact.",
     )
+    expand_parser.add_argument(
+        "--sort",
+        choices=["default", "citations", "year", "year-asc", "title"],
+        default="default",
+        help=(
+            "Sort candidates before output. "
+            "'citations' = most cited first, "
+            "'year' = most recent first, "
+            "'year-asc' = oldest first, "
+            "'title' = alphabetical. "
+            "Default preserves provider order."
+        ),
+    )
     return parser
+
+
+def sort_candidates(
+    candidates: list[DiscoveryCandidateArtifact], sort_by: str
+) -> list[DiscoveryCandidateArtifact]:
+    if sort_by == "default":
+        return candidates
+    if sort_by == "citations":
+        return sorted(
+            candidates,
+            key=lambda c: (
+                c.paper.citation_count is None,
+                -(c.paper.citation_count or 0),
+            ),
+        )
+    if sort_by == "year":
+        return sorted(
+            candidates,
+            key=lambda c: (c.paper.year is None, -(c.paper.year or 0)),
+        )
+    if sort_by == "year-asc":
+        return sorted(
+            candidates,
+            key=lambda c: (c.paper.year is None, c.paper.year or 0),
+        )
+    if sort_by == "title":
+        return sorted(
+            candidates,
+            key=lambda c: (c.paper.title or "").casefold(),
+        )
+    return candidates
 
 
 def render_run(run: DiscoveryRun, *, output_format: str) -> str:
@@ -105,11 +150,41 @@ def render_text_run(run: DiscoveryRun) -> str:
     if not run.candidates:
         lines.append("- None")
     for candidate in run.candidates:
-        title = candidate.paper.title or candidate.paper.provider_paper_id or "<untitled>"
+        paper = candidate.paper
+        title = paper.title or paper.provider_paper_id or "<untitled>"
         if candidate.score is not None:
             lines.append(f"- {title} (score={candidate.score.total:.4f})")
         else:
             lines.append(f"- {title}")
+        # Year / venue / citations
+        meta_parts: list[str] = []
+        if paper.year is not None:
+            meta_parts.append(str(paper.year))
+        if paper.venue:
+            meta_parts.append(paper.venue)
+        if paper.citation_count is not None:
+            meta_parts.append(f"{paper.citation_count:,} citations")
+        if meta_parts:
+            lines.append("  " + " · ".join(meta_parts))
+        # Authors
+        if paper.authors:
+            author_str = ", ".join(a.name for a in paper.authors[:3])
+            if len(paper.authors) > 3:
+                author_str += f" +{len(paper.authors) - 3} more"
+            lines.append(f"  {author_str}")
+        # TL;DR or abstract snippet
+        if paper.tldr:
+            lines.append(f"  tldr: {paper.tldr}")
+        elif paper.abstract:
+            snippet = paper.abstract[:200].rstrip()
+            if len(paper.abstract) > 200:
+                snippet += "…"
+            lines.append(f"  abstract: {snippet}")
+        # URL / DOI / arXiv
+        link = paper.open_access_pdf_url or paper.provider_url
+        if link:
+            lines.append(f"  {link}")
+        # Provenance
         for provenance in candidate.provenance:
             lines.append(
                 "  via "
@@ -139,7 +214,7 @@ def main() -> int:
         return 0
     if args.command == "expand":
         if args.forward_limit < 0 or args.reverse_limit < 0:
-            parser.error("--forward-limit and --reverse-limit must be >= 0.")
+            parser.error("--forward-limit and --reverse-limit must be >= 0 (use 0 for no limit).")
         criteria = None
         if args.criteria_file:
             try:
@@ -161,6 +236,8 @@ def main() -> int:
             criteria=criteria,
             criteria_source=args.criteria_file,
         )
+        if args.sort != "default":
+            run = replace(run, candidates=sort_candidates(run.candidates, args.sort))
         rendered = render_run(run, output_format=args.output_format)
         if args.output_file:
             output_path = Path(args.output_file)
