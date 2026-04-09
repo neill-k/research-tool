@@ -10,6 +10,24 @@ This repository currently includes the first discovery slices for `NEI-292`, `NE
 python -m pip install -e ".[dev]"
 ```
 
+For a repo-local arXiv MCP server, the dev extras now include
+`arxiv-paper-mcp-server`. This is a tooling dependency, not an application
+runtime dependency.
+
+With `uv`, you can install and run it from this project:
+
+```bash
+uv sync --extra dev
+uv run arxiv-paper-mcp-server
+```
+
+If you want Codex to use the server while still sourcing it from this repo's
+environment, register it with:
+
+```bash
+codex mcp add arxiv-local -- uv run --project C:\Users\neill\code\research-tool arxiv-paper-mcp-server
+```
+
 ## CLI
 
 Fetch a paper by Semantic Scholar paper ID, Corpus ID, DOI, or another identifier accepted by the provider:
